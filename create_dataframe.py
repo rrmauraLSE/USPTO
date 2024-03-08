@@ -1,9 +1,20 @@
 
 """
-This script is used to create a dataframe by parsing XML files in a given folder. 
-The XML files contain information about patent publications, including publication title, number, date, application type, classifications, inventors, abstracts, descriptions, and claims. 
-The script unzips any compressed files in the folder and its subfolders, then parses each XML file to extract the relevant information. 
-The extracted information is stored in a pandas DataFrame, which is then saved as a CSV file.
+This creates a dataframe by parsing XML files in a given folder. 
+The XML files contain information about patent publications, including: 
+- publication title
+- number
+- date
+- application type
+- classifications
+- inventors
+- abstracts
+- descriptions
+- claims
+
+The script unzips any compressed files in the folder and its subfolders, 
+then parses each XML file to extract the relevant information. 
+The extracted information is stored in a pandas DataFrame, saved as a CSV file.
 """
 
 import os
@@ -140,7 +151,7 @@ def create_dataframe(folder_year: str) -> pd.DataFrame:
                                'application_type',
                                'classifications',
                                'inventors',
-                               'abstracts',
+                               'abstract',
                                'descriptions',
                                'claims'])
 
@@ -169,7 +180,7 @@ if __name__ == "__main__":
     # folder_year = os.path.join(main_folder, "2005")
 
     # fake folder to do testing:
-    folder_year = r"C:\Users\Roberto\Desktop\fake_2005_folder"
+    folder_year = r"C:\Users\Roberto\Documents\GitHub Repositories\USPTO\data\fake_2005_folder"
 
     # unzip_files(folder_year)
 
