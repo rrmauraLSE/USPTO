@@ -1,9 +1,15 @@
-# this code calls GPT4 and obtains a response.
+# this code calls OpenAI and obtains a response.
 # It is designed so that it can be called multiple times in parallel.
+# There are two functions:
+#    get_completion_list: calls GPT4
+#    get_embedding_list: obtaining embeddings.
 
 
 import asyncio
 import aiohttp
+from openai import OpenAI, AsyncOpenAI
+import time
+# from obtain_embeddings import get_embeddings
 
 # read key from a txt file
 OPENAI_API_KEY = open("data/openAI_key.txt", "r").read()
@@ -12,6 +18,11 @@ headers = {
     "Content-Type": "application/json",
     "Authorization": f"Bearer {OPENAI_API_KEY}"
 }
+
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+# progress class. Keeps track of how many calls have been made.
+# TODO: Do I need this? can I get rid of this class?
 
 
 class ProgressLog:
@@ -26,6 +37,7 @@ class ProgressLog:
         return f"Done runs {self.current}/{self.total}"
 
 
+# CHATGPT code
 async def get_completion(sys_promt, prompt, session, semaphore, progress_log):
     async with semaphore:
 
@@ -59,11 +71,55 @@ async def get_completion_list(sys_prompt, content_list, max_parallel_calls):
         completions = await asyncio.gather(*tasks)
         return completions
 
-if __name__ == "__main__":
-    # example usecase
 
-    sys_prompt = "You are a helpful assistant."
-    content_list = ["I need to find a way to make my code run faster."]
-    completions = asyncio.run(get_completion_list(sys_prompt, content_list, 1))
-    print(completions)
-    print("Done!")
+async def get_embeddings_async(text: str, model: str, semaphore: asyncio.Semaphore) -> dict:
+    async with semaphore:
+        try:
+            response = await asyncio.wait_for(client.embeddings.create(
+                input=text,
+                model=model
+            ), timeout=10)
+
+            # return response['data'][0]['embedding']
+            return response.data[0].embedding
+        except asyncio.TimeoutError:
+            return None
+
+
+async def get_embedding_list(content_list, max_parallel_calls):
+
+    semaphore = asyncio.Semaphore(max_parallel_calls)
+
+    tasks = [get_embeddings_async(content, model="text-embedding-ada-002", semaphore=semaphore)
+             for content in content_list]
+    embeddings = await asyncio.gather(*tasks)
+    return embeddings
+
+
+if __name__ == "__main__":
+    # example 1
+    if False:
+        sys_prompt = "You are a helpful assistant."
+        content_list = ["I need to find a way to make my code run faster."]
+        completions = asyncio.run(
+            get_completion_list(sys_prompt, content_list, 1))
+        print(completions)
+        print("Done!")
+
+    # example 2
+    if True:
+        for i in range(20):
+            start_time = time.time()
+
+            # TODO: i think the limit is 500 requests per min
+            content_list = ["hello world!"] * 400
+            embeddings = asyncio.run(get_embedding_list(
+                content_list, max_parallel_calls=400))
+
+            end_time = time.time()
+            execution_time = end_time - start_time
+            print("Execution time:", execution_time, "seconds")
+            print("number of embeddings:", len(embeddings))
+            print("number of None values: ", embeddings.count(None))
+
+            # THIS IS INTERESTING... MAYBE THERE ARE NO nONE VALUES, BUT THERE STILL IS NO EMBEDDINGS. check what is the output with this configuration.

@@ -13,6 +13,7 @@ text-embedding-3-large	    3072	        8191
 
 
 from openai import OpenAI
+import asyncio
 
 # read key from a txt file
 OPENAI_API_KEY = open("data/openAI_key.txt", "r").read()
@@ -24,8 +25,10 @@ headers = {
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# default model text-embedding-3-small
 
-def get_embeddings(text: str, model: str) -> dict:
+
+async def get_embeddings(text: str, model: str = "text-embedding-3-small") -> dict:
     """
     Get the embeddings of a given text using a given model.
 
@@ -53,12 +56,6 @@ if __name__ == "__main__":
     )
 
     print(response.data[0].embedding)
-
-
-# okay, learn about finetuning GPT4... and learn about the dimensions/max size
-# of your model and prize... you already did that homework...
-# some qualitative graphs. See that indeed embeddings divide the data in sectors.
-# check percentage of patents that exceed the tokens...
 
 
 # https://stackoverflow.com/questions/74907244/how-can-i-use-batch-embeddings-using-openais-api
