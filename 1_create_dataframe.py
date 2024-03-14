@@ -17,12 +17,15 @@ then parses each XML file to extract the relevant information.
 The extracted information is stored in a pandas DataFrame, saved as a CSV file.
 """
 
-import os
-import zipfile
-import html
-import pandas as pd
-from bs4 import BeautifulSoup
 from tqdm import tqdm
+from bs4 import BeautifulSoup
+import pandas as pd
+import html
+import zipfile
+import os
+MAX_TOKENS = 8191
+MAX_CALLS_PER_SECOND = 10
+
 
 # Notes for me:
 # it takes around 10 min to run for 2 folders.

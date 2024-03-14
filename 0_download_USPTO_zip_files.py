@@ -4,6 +4,10 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import os
 
+# decide which years to download
+FIRST_YEAR = 2005
+FINAL_YEAR = 2005
+
 
 def download_zip_files(year, text_or_image, application_or_grant="application"):
     print(
@@ -49,9 +53,6 @@ def download_zip_files(year, text_or_image, application_or_grant="application"):
         print(f"Failed to access {base_url}")
 
 
-first_year = 2005
-final_year = 2005
-
-for year in range(first_year, final_year + 1):
+for year in range(FIRST_YEAR, FINAL_YEAR + 1):
     download_zip_files(str(year), "image")
 print("Downloaded all zip files")
