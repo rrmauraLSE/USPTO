@@ -23,10 +23,13 @@ import pandas as pd
 import html
 import zipfile
 import os
+import tiktoken
 
-MAX_TOKENS = 8191
+
 MAX_CALLS_PER_SECOND = 10
-
+TXT_COLUMNS = ["abstract", "claims", "description", "title"]
+MODEL = "text-embedding-ada-002"
+MAX_TOKENS = 8191  # this value depends on the model.
 
 # Notes for me:
 # it takes around 10 min to run for 2 folders.
@@ -34,7 +37,12 @@ MAX_CALLS_PER_SECOND = 10
 
 # TODO: what am I supossed to do with the supplementary material?
 # TODO: delete the zip files after unzipping them
-# TODO: when you do the whole thing, add a "try", and keep track of the files that failed to parse
+
+
+def count_tokens(string: str, encoding_name: str) -> int:
+    encoding = tiktoken.encoding_for_model(encoding_name)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
 
 
 def is_file_compressed(file_path: str) -> bool:
@@ -125,7 +133,7 @@ def parse_xml(xml_path: str) -> dict:
               for claim in soup.find_all('claim')]
 
     return {
-        'publication_title': title,
+        'title': title,
         'publication_number': number,
         'publication_date': date,
         'application_type': application_type,
@@ -138,7 +146,7 @@ def parse_xml(xml_path: str) -> dict:
     }
 
 
-def get_all_xml_files(folder: str) -> list:
+def get_relevant_xml_files(folder: str) -> list:
     all_xml_files = []
     for root, _, files in os.walk(folder):
         for file in files:
@@ -160,27 +168,33 @@ def create_dataframe(folder_year: str) -> pd.DataFrame:
         pd.DataFrame: The created dataframe.
     """
     # create empty dataframe
-    df = pd.DataFrame(columns=['publication_title',
-                               'publication_num',
+    df = pd.DataFrame(columns=['title',
+                               'publication_number',
                                'publication_date',
                                'application_type',
-                               'classifications',
+                               'ipc_classifications',
+                               'national_classifications',
                                'inventors',
                                'abstract',
-                               'descriptions',
+                               'description',
                                'claims'])
 
+    error_files = []
+
     # iterate over all XML files in the folder
-    all_xml_files = get_all_xml_files(folder_year)
+    relevant_xml_files = get_relevant_xml_files(folder_year)
 
-    for xml_path in tqdm(all_xml_files, desc="Parsing XML files"):
-        parsed_xml = parse_xml(xml_path)
-        df = pd.concat([df, pd.DataFrame([parsed_xml])],
-                       ignore_index=True)
+    for xml_path in tqdm(relevant_xml_files, desc="Parsing XML files"):
+        try:
+            parsed_xml = parse_xml(xml_path)
+            df = pd.concat([df, pd.DataFrame([parsed_xml])],
+                           ignore_index=True)
 
-        # TODO: add image embeddings and text embeddings
+        except Exception as e:
+            print(f"Error parsing {xml_path}: {e}")
+            error_files.append(xml_path)
 
-    return df
+    return df, error_files
 
 
 if __name__ == "__main__":
@@ -194,11 +208,20 @@ if __name__ == "__main__":
 
     # unzip_files(folder_year)
 
-    df = create_dataframe(folder_year)
+    df, error_files = create_dataframe(folder_year)
 
-    print("Dataframe created")
+    # save error files
+    with open(os.path.join(folder_year, "error_files.txt"), "w") as file:
+        for error_file in error_files:
+            file.write(error_file + "\n")
+
+    # count characters and tokens
+    for col in TXT_COLUMNS:
+        df[f"{col}_characters"] = df[col].apply(lambda x: len(x))
+        df[f"{col}_tokens"] = df[col].apply(lambda x: count_tokens(x, MODEL))
 
     # save dataframe to csv
     df.to_csv(os.path.join(folder_year, "dataframe.csv"), index=False)
 
-    # TODO: run this on a notebook and check the dataframe, and how big it is.
+    print("Dataframe created")
+    print(f"Error files: {len(error_files)}")

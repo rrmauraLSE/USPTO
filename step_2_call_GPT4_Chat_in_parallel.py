@@ -9,6 +9,8 @@ import asyncio
 import aiohttp
 from openai import OpenAI, AsyncOpenAI
 import time
+import cProfile
+import pstats
 # from obtain_embeddings import get_embeddings
 
 # read key from a txt file
@@ -108,18 +110,24 @@ if __name__ == "__main__":
 
     # example 2
     if True:
-        for i in range(20):
-            start_time = time.time()
+        with cProfile.Profile() as pr:
 
-            # TODO: i think the limit is 500 requests per min
-            content_list = ["hello world!"] * 400
-            embeddings = asyncio.run(get_embedding_list(
-                content_list, max_parallel_calls=400))
+            for i in range(2):
+                start_time = time.time()
 
-            end_time = time.time()
-            execution_time = end_time - start_time
-            print("Execution time:", execution_time, "seconds")
-            print("number of embeddings:", len(embeddings))
-            print("number of None values: ", embeddings.count(None))
+                # TODO: i think the limit is 500 requests per min
+                content_list = ["hello world!"] * 20
+                embeddings = asyncio.run(get_embedding_list(
+                    content_list, max_parallel_calls=500))
 
-            # THIS IS INTERESTING... MAYBE THERE ARE NO nONE VALUES, BUT THERE STILL IS NO EMBEDDINGS. check what is the output with this configuration.
+                end_time = time.time()
+                execution_time = end_time - start_time
+                print("Execution time:", execution_time, "seconds")
+                print("number of embeddings:", len(embeddings))
+                print("number of None values: ", embeddings.count(None))
+
+            results = pstats.Stats(pr).strip_dirs().sort_stats('cumulative')
+            # save results to a file profile_results
+            results.dump_stats('profile_results')
+            # print the results to the console
+            results.print_stats()

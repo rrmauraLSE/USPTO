@@ -30,7 +30,10 @@ import time
 import pandas as pd
 import asyncio
 import os
-from call_GPT4_Chat_in_parallel import get_embedding_list
+from step_2_call_GPT4_Chat_in_parallel import get_embedding_list
+from step_1_create_dataframe import TXT_COLUMNS, MODEL
+
+TXT_COLUMNS = ["abstract"]  # TODO: delete this line
 
 # tokens per minute
 TPM = 1e6
@@ -39,8 +42,6 @@ TPM = 1e6
 RPM = 400
 # max tokens per request
 MTPR = 8191
-
-MODEL = "text-embedding-ada-002"
 
 
 def from_sub_df_get_embeddings(txt_col: str, df: pd.DataFrame, k: int) -> list:
@@ -67,26 +68,26 @@ def from_sub_df_get_embeddings(txt_col: str, df: pd.DataFrame, k: int) -> list:
     last_request_time = time.time()
 
     def check_wait(last_request_time: float):
-        """Check if we need to wait and wait if necessary."""
-        time_since_last_request = time.time() - last_request_time
-        if time_since_last_request < 60:
-            time.sleep(60 - time_since_last_request)
+        return
+        # TODO: delete this line
+        # """Check if we need to wait and wait if necessary."""
+        # time_since_last_request = time.time() - last_request_time
+        # if time_since_last_request < 60:
+        #     time.sleep(60 - time_since_last_request)
 
     for i, row in df.iterrows():
-        tokens = len(row[f"{txt_col}_tokens"])
+        n_tokens = row[f"{txt_col}_tokens"]
         txt = row[txt_col]
         # cut the text
         txt = txt[k*MTPR: min(len(txt), (k+1)*MTPR)]
 
         # check if we need to make a request
-        if batch_tokens + tokens >= TPM or batch_requests + 1 >= RPM:
-            # do the request, empty the batch and start again
-
+        if batch_tokens + n_tokens >= TPM or batch_requests + 1 >= RPM:
             # check if we need to wait and wait if necessary
             check_wait(last_request_time)
 
             batch_embed = asyncio.run(
-                get_embedding_list(batch, max_calls_per_min=RPM))
+                get_embedding_list(batch, max_parallel_calls=RPM))
             last_request_time = time.time()
 
             embeddings.extend(batch_embed)
@@ -95,12 +96,13 @@ def from_sub_df_get_embeddings(txt_col: str, df: pd.DataFrame, k: int) -> list:
             batch_requests = 0
 
         batch.append(txt)
-        batch_tokens += tokens
+        batch_tokens += n_tokens
         batch_requests += 1
 
     # last batch
     check_wait(last_request_time)
-    batch_embed = asyncio.run(get_embedding_list(batch, max_calls_per_min=RPM))
+    batch_embed = asyncio.run(
+        get_embedding_list(batch, max_parallel_calls=RPM))
     embeddings.extend(batch_embed)
 
     # extend the embeddings for long texts
@@ -111,27 +113,38 @@ def from_sub_df_get_embeddings(txt_col: str, df: pd.DataFrame, k: int) -> list:
     return old_embeddings
 
 
-# we are sequentially going to get the embeddings from the text.
-# First the first MTPR=8191 tokens, then the next MTPR=8191 tokens, and so on.
-# We are doing this for abstract, claims, description, and title
+if __name__ == "__main__":
 
+    # we are sequentially going to get the embeddings from the text.
+    # First the first MTPR=8191 tokens, then the next MTPR=8191 tokens, and so on.
+    # We are doing this for abstract, claims, description, and title
 
-# open dataframe
-folder_year = r"C:\Users\Roberto\Documents\GitHub Repositories\USPTO\data\fake_2005_folder"
-df = pd.read_csv(os.path.join(folder_year, "dataframe.csv"))
+    # open dataframe
+    folder_year = r"C:\Users\Roberto\Documents\GitHub Repositories\USPTO\data\fake_2005_folder"
+    df = pd.read_csv(os.path.join(folder_year, "dataframe.csv"))
 
-# keeps track of which part of the text we are processing
-segment_idx = 0
+    # TODO: delete this line!
+    df = df.head(1000)
 
-for txt_col in ["abstract", "claims", "description", "title"]:
-    sub_df = df
+    # create column with empty lists
+    for txt_col in TXT_COLUMNS:
+        df[f"{txt_col}_embeddings"] = df[txt_col].apply(lambda x: [])
 
-    while len(sub_df) > 0:
-        segment_idx += 1
-        sub_df = df[df[f"{txt_col}_tokens"] > segment_idx*MTPR]
-        embeddings = from_sub_df_get_embeddings(txt_col, sub_df, segment_idx)
-        df[f"{txt_col}_embeddings"] = embeddings
+    # keeps track of which part of the text we are processing
+    segment_idx = 0
 
-# save the dataframe
-df.to_csv("data/df_with_embeddings.csv", index=False)
-print("Dataframe saved")
+    for col in TXT_COLUMNS:
+        print(f"Processing {col}")
+
+        sub_df = df
+
+        while len(sub_df) > 0:
+            embeddings = from_sub_df_get_embeddings(col, sub_df, segment_idx)
+            df[f"{col}_embeddings"] = embeddings
+
+            segment_idx += 1
+            sub_df = df[df[f"{col}_tokens"] > segment_idx*MTPR]
+
+    # save the dataframe
+    df.to_csv("data/df_with_embeddings.csv", index=False)
+    print("Dataframe saved")
