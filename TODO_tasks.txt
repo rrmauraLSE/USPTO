@@ -1,0 +1,2 @@
+# TODO: use the biggest CLIP model later. start with smaller (& finetune it)
+# TODO: think on how to finetune BLIP (but this is optional )

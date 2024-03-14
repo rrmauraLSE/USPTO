@@ -23,6 +23,7 @@ import pandas as pd
 import html
 import zipfile
 import os
+
 MAX_TOKENS = 8191
 MAX_CALLS_PER_SECOND = 10
 
@@ -85,6 +86,7 @@ def parse_xml(xml_path: str) -> dict:
     """
 
     def get_text_or_none(tag):
+        # save the name of the tag
         return tag.get_text() if tag else None
 
     with open(xml_path, 'r', encoding='UTF-8') as file:
@@ -93,31 +95,30 @@ def parse_xml(xml_path: str) -> dict:
     soup = BeautifulSoup(content, 'xml')
 
     # Extracting publication title, number, and date
-    title = get_text_or_none(soup.find('invention-title'))
-    number = get_text_or_none(
-        soup.find('publication-reference').find('doc-number'))
-    date = get_text_or_none(soup.find('publication-reference').find('date'))
+    title = soup.find('invention-title').get_text()
+    number = soup.find('publication-reference').find('doc-number').get_text()
+    date = soup.find('publication-reference').find('date').get_text()
 
     # Application type
     application_reference = soup.find('application-reference')
     application_type = application_reference['appl-type'] if application_reference else None
 
     # Classifications
-    ipc_classifications = [get_text_or_none(
-        ipc) for ipc in soup.find_all('classification-ipc')]
-    national_classifications = [get_text_or_none(
-        nc) for nc in soup.find_all('classification-national')]
+    ipc_classifications = [ipc.get_text()
+                           for ipc in soup.find_all('classification-ipc')]
+    national_classifications = [nc.get_text()
+                                for nc in soup.find_all('classification-national')]
 
     # Inventors
-    inventors = [{'last_name': get_text_or_none(inventor.find('last-name')),
-                  'first_name': get_text_or_none(inventor.find('first-name'))}
+    inventors = [{'last_name': inventor.find('last-name').get_text(),
+                  'first_name': inventor.find('first-name').get_text()}
                  for inventor in soup.find_all('applicant')]
 
     # Abstract
-    abstract = get_text_or_none(soup.find('abstract'))
+    abstract = soup.find('abstract').get_text()
 
     # Description
-    description = get_text_or_none(soup.find('description'))
+    description = soup.find('description').get_text()
 
     # Claims
     claims = [claim.get_text(separator="\n", strip=True)
@@ -135,6 +136,17 @@ def parse_xml(xml_path: str) -> dict:
         'description': description,
         'claims': claims
     }
+
+
+def get_all_xml_files(folder: str) -> list:
+    all_xml_files = []
+    for root, _, files in os.walk(folder):
+        for file in files:
+            # ignore SEQLST files (they contain genetic list data)
+            if file.lower().endswith(".xml") and "seqlst" not in file.lower():
+                xml_path = os.path.join(root, file)
+                all_xml_files.append(xml_path)
+    return all_xml_files
 
 
 def create_dataframe(folder_year: str) -> pd.DataFrame:
@@ -159,12 +171,7 @@ def create_dataframe(folder_year: str) -> pd.DataFrame:
                                'claims'])
 
     # iterate over all XML files in the folder
-    all_xml_files = []
-    for root, _, files in os.walk(folder_year):
-        for file in files:
-            if file.lower().endswith(".xml"):
-                xml_path = os.path.join(root, file)
-                all_xml_files.append(xml_path)
+    all_xml_files = get_all_xml_files(folder_year)
 
     for xml_path in tqdm(all_xml_files, desc="Parsing XML files"):
         parsed_xml = parse_xml(xml_path)
