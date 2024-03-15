@@ -19,8 +19,7 @@ create batches until we achieve the max number of tokens per minute or the max
 max number of requests per minute. Then we will make the requests and start
 again. 
 
-Models from OpenAI 
-                        Dimensions    Max tokens
+Models from OpenAI        Dimensions    Max tokens
 text-embedding-ada-002	    1536	        8191
 text-embedding-3-small	    1536	        8191
 text-embedding-3-large	    3072	        8191
@@ -34,6 +33,7 @@ from step_2_call_GPT4_Chat_in_parallel import get_embedding_list
 from step_1_create_dataframe import TXT_COLUMNS, MODEL
 
 TXT_COLUMNS = ["abstract"]  # TODO: delete this line
+print("WARNING: only processing abstracts")  # TODO: delete this line
 
 # tokens per minute
 TPM = 1e6
@@ -121,7 +121,7 @@ if __name__ == "__main__":
 
     # open dataframe
     folder_year = r"C:\Users\Roberto\Documents\GitHub Repositories\USPTO\data\fake_2005_folder"
-    df = pd.read_csv(os.path.join(folder_year, "dataframe.csv"))
+    df = pd.read_parquet(os.path.join(folder_year, "dataframe.parquet"))
 
     # TODO: delete this line!
     df = df.head(1000)
@@ -146,5 +146,5 @@ if __name__ == "__main__":
             sub_df = df[df[f"{col}_tokens"] > segment_idx*MTPR]
 
     # save the dataframe
-    df.to_csv("data/df_with_embeddings.csv", index=False)
+    df.to_parquet("data/df_with_embeddings.parquet", index=False)
     print("Dataframe saved")

@@ -1,0 +1,48 @@
+pep8
+hinting
+
+
+#############################
+
+profiling: 
+
+# run a program and profile it and save the results
+python -m cProfile -o output.prof main.py
+
+# see the results
+tuna output.prof
+
+#############################
+
+
+
+https://www.youtube.com/watch?v=dLzMz2Jk_qU
+
+terminal 
+ctr ~
+
+left column
+ctrl B
+
+Open file (instead of searching over folders on the lef)
+ctrl P 
+
+
+
+Look for a class in your file
+ctrl P and write @
+
+
+
+multiple columns selected
+shift alt
+
+
+(maybe focus on the actual information that you need
+
+You need the text ->
+YOU NEED THE IMAGES! ->
+You need the names -> this is in dataset 0
+you need info about it being initially accepted or not ->
+
+you need the images ->

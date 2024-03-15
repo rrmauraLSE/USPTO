@@ -131,6 +131,7 @@ def parse_xml(xml_path: str) -> dict:
     # Claims
     claims = [claim.get_text(separator="\n", strip=True)
               for claim in soup.find_all('claim')]
+    claims = "\n".join(claims)
 
     return {
         'title': title,
@@ -220,8 +221,8 @@ if __name__ == "__main__":
         df[f"{col}_characters"] = df[col].apply(lambda x: len(x))
         df[f"{col}_tokens"] = df[col].apply(lambda x: count_tokens(x, MODEL))
 
-    # save dataframe to csv
-    df.to_csv(os.path.join(folder_year, "dataframe.csv"), index=False)
+    # save dataframe
+    df.to_parquet(os.path.join(folder_year, "dataframe.parquet"), index=False)
 
     print("Dataframe created")
     print(f"Error files: {len(error_files)}")
