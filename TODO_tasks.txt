@@ -4,3 +4,7 @@
 # TODO: in function "get_embedding_list", what should  "max_parallel_calls" be? 
 
 IT SEEMS THAT IT IS SAVED AS A TEXT!!
+
+get variable "gender" and variable "accepted" 
+
+start to work on finetuned patent images

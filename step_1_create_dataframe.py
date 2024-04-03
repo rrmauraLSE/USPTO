@@ -105,6 +105,8 @@ def parse_xml(xml_path: str) -> dict:
     # Extracting publication title, number, and date
     title = soup.find('invention-title').get_text()
     number = soup.find('publication-reference').find('doc-number').get_text()
+    application_id = soup.find(
+        'us-related-documents').find('doc-number').get_text()
     date = soup.find('publication-reference').find('date').get_text()
 
     # Application type
@@ -135,6 +137,7 @@ def parse_xml(xml_path: str) -> dict:
 
     return {
         'title': title,
+        'application_id': application_id,
         'publication_number': number,
         'publication_date': date,
         'application_type': application_type,
