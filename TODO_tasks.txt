@@ -3,8 +3,8 @@
 # TODO: create a step 1.5 that takes df and adds token columns and other stuff
 # TODO: in function "get_embedding_list", what should  "max_parallel_calls" be? 
 
-IT SEEMS THAT IT IS SAVED AS A TEXT!!
+get variable "gender"
 
-get variable "gender" and variable "accepted" 
+
 
 start to work on finetuned patent images

@@ -105,8 +105,11 @@ def parse_xml(xml_path: str) -> dict:
     # Extracting publication title, number, and date
     title = soup.find('invention-title').get_text()
     number = soup.find('publication-reference').find('doc-number').get_text()
-    application_id = soup.find(
-        'us-related-documents').find('doc-number').get_text()
+    try:
+        application_id = soup.find('parent-doc').find('doc-number').get_text()
+    except:
+        application_id = soup.find(
+            'application-reference').find('doc-number').get_text()
     date = soup.find('publication-reference').find('date').get_text()
 
     # Application type
@@ -197,6 +200,7 @@ def create_dataframe(folder_year: str) -> pd.DataFrame:
         except Exception as e:
             print(f"Error parsing {xml_path}: {e}")
             error_files.append(xml_path)
+            print("shape of df: ", df.shape)
 
     return df, error_files
 
