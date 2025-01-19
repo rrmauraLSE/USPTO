@@ -1,133 +1,176 @@
-# this code calls OpenAI and obtains a response.
-# It is designed so that it can be called multiple times in parallel.
-# There are two functions:
-#    get_completion_list: calls GPT4
-#    get_embedding_list: obtaining embeddings.
+"""Asynchronous OpenAI API client for parallel GPT-4 chat embeddings.
 
+This module provides functionality to make parallel calls to OpenAI's GPT-4 
+chat completion and embedding APIs. It includes rate limiting and proper error 
+
+Example:
+    >>> sys_prompt = "You are a helpful assistant."
+    >>> messages = ["Hello, how are you?", "What is 2+2?"]
+    >>> completions = asyncio.run(get_completion_list(
+             sys_prompt, messages, max_parallel=5))
+"""
 
 import asyncio
 import aiohttp
-from openai import OpenAI, AsyncOpenAI
 import time
 import cProfile
 import pstats
-# from obtain_embeddings import get_embeddings
+from typing import List, Optional, Any
+from pathlib import Path
+from openai import AsyncOpenAI
 
-# read key from a txt file
-OPENAI_API_KEY = open("data/openAI_key.txt", "r").read()
+# Load API key from config file
+API_KEY_PATH = Path("data/openAI_key.txt")
+OPENAI_API_KEY = API_KEY_PATH.read_text().strip()
 
+# Configure API client and headers
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 headers = {
     "Content-Type": "application/json",
     "Authorization": f"Bearer {OPENAI_API_KEY}"
 }
 
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-# progress class. Keeps track of how many calls have been made.
-# TODO: Do I need this? can I get rid of this class?
+class ProgressTracker:
+    """Tracks progress of API calls."""
 
+    def __init__(self, total: int):
+        """Initialize progress tracker.
 
-class ProgressLog:
-    def __init__(self, total):
+        Args:
+            total: Total number of expected API calls
+        """
         self.total = total
         self.current = 0
 
-    def increment(self):
-        self.current = self.current + 1
+    def increment(self) -> None:
+        """Increment the count of completed calls."""
+        self.current += 1
 
-    def __repr__(self):
-        return f"Done runs {self.current}/{self.total}"
+    def __str__(self) -> str:
+        return f"Completed {self.current}/{self.total} calls"
 
 
-# CHATGPT code
-async def get_completion(sys_promt, prompt, session, semaphore, progress_log):
+async def get_completion(
+    system_prompt: str,
+    user_prompt: str,
+    session: aiohttp.ClientSession,
+    semaphore: asyncio.Semaphore,
+    progress: ProgressTracker
+) -> dict:
+    """Make a single GPT chat completion API call.
+
+    Args:
+        system_prompt: System message for chat context
+        user_prompt: User message to get completion for
+        session: Aiohttp client session
+        semaphore: Rate limiting semaphore
+        progress: Progress tracking object
+
+    Returns:
+        API response data as dictionary
+    """
     async with semaphore:
-
+        # Rate limiting delay
         await asyncio.sleep(1)
 
-        async with session.post("https://api.openai.com/v1/chat/completions", headers=headers, json={
-            "model": "gpt-3.5-turbo",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": sys_promt
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-        }) as response:
+        async with session.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "gpt-3.5-turbo",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            }
+        ) as response:
             data = await response.json()
-            progress_log.increment()
+            progress.increment()
             return data
 
 
-async def get_completion_list(sys_prompt, content_list, max_parallel_calls):
+async def get_completion_list(
+    system_prompt: str,
+    content_list: List[str],
+    max_parallel_calls: int
+) -> List[dict]:
+    """Get chat completions for multiple prompts in parallel.
+
+    Args:
+        system_prompt: System message for all completions
+        content_list: List of user prompts to get completions for
+        max_parallel_calls: Maximum concurrent API calls
+
+    Returns:
+        List of API response data
+    """
     semaphore = asyncio.Semaphore(value=max_parallel_calls)
-    progress_log = ProgressLog(len(content_list))
+    progress = ProgressTracker(len(content_list))
 
     async with aiohttp.ClientSession() as session:
-        tasks = [get_completion(sys_prompt, content, session,
-                                semaphore, progress_log) for content in content_list]
-        completions = await asyncio.gather(*tasks)
-        return completions
+        tasks = [
+            get_completion(
+                system_prompt,
+                content,
+                session,
+                semaphore,
+                progress
+            )
+            for content in content_list
+        ]
+        return await asyncio.gather(*tasks)
 
 
-async def get_embeddings_async(text: str, model: str, semaphore: asyncio.Semaphore) -> dict:
+async def get_embedding_async(
+    text: str,
+    model: str,
+    semaphore: asyncio.Semaphore
+) -> Optional[List[float]]:
+    """Get embeddings for a single text.
+
+    Args:
+        text: Input text to get embedding for
+        model: Name of embedding model to use
+        semaphore: Rate limiting semaphore
+
+    Returns:
+        Embedding vector or None if request times out
+    """
     async with semaphore:
         try:
-            response = await asyncio.wait_for(client.embeddings.create(
-                input=text,
-                model=model
-            ), timeout=10)
-
-            # return response['data'][0]['embedding']
+            response = await asyncio.wait_for(
+                client.embeddings.create(
+                    input=text,
+                    model=model
+                ),
+                timeout=10
+            )
             return response.data[0].embedding
         except asyncio.TimeoutError:
             return None
 
 
-async def get_embedding_list(content_list, max_parallel_calls):
+async def get_embedding_list(
+    content_list: List[str],
+    max_parallel_calls: int
+) -> List[Optional[List[float]]]:
+    """Get embeddings for multiple texts in parallel.
 
+    Args:
+        content_list: List of texts to get embeddings for
+        max_parallel_calls: Maximum concurrent API calls
+
+    Returns:
+        List of embedding vectors (None for failed requests)
+    """
     semaphore = asyncio.Semaphore(max_parallel_calls)
-
-    tasks = [get_embeddings_async(content, model="text-embedding-ada-002", semaphore=semaphore)
-             for content in content_list]
-    embeddings = await asyncio.gather(*tasks)
-    return embeddings
-
-
-if __name__ == "__main__":
-    # example 1
-    if False:
-        sys_prompt = "You are a helpful assistant."
-        content_list = ["I need to find a way to make my code run faster."]
-        completions = asyncio.run(
-            get_completion_list(sys_prompt, content_list, 1))
-        print(completions)
-        print("Done!")
-
-    # example 2
-    if True:
-        with cProfile.Profile() as pr:
-
-            for i in range(2):
-                start_time = time.time()
-
-                # TODO: i think the limit is 500 requests per min
-                content_list = ["hello world!"] * 20
-                embeddings = asyncio.run(get_embedding_list(
-                    content_list, max_parallel_calls=500))
-
-                end_time = time.time()
-                execution_time = end_time - start_time
-                print("Execution time:", execution_time, "seconds")
-                print("number of embeddings:", len(embeddings))
-                print("number of None values: ", embeddings.count(None))
-
-            results = pstats.Stats(pr).strip_dirs().sort_stats('cumulative')
-            # save results to a file profile_results
-            results.dump_stats('profile_results')
-            # print the results to the console
-            results.print_stats()
+    tasks = [
+        get_embedding_async(
+            content,
+            model="text-embedding-ada-002",
+            semaphore=semaphore
+        )
+        for content in content_list
+    ]
+    return await asyncio.gather(*tasks)
