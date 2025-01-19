@@ -1,150 +1,151 @@
-# TODO description of the program
+"""Process USPTO patent text data into embeddings using OpenAI models.
 
-"""
-This program takes the dataframe created from USPTO data and transforms the 
-text data into embeddings using OpenAI's models. some texts are too long to be
-processed in one request, so we are going to split them into smaller parts.
+This script takes a DataFrame with USPTO patent data and generates embeddings
+for the text fields using OpenAI's embedding models. Since some texts exceed 
+the token limit for a single request, they are split into segments.
 
-On every request, there is a max number of tokens that can be processed. 
-Max Tokens Per Request (MTPR) is 8191.
+Key parameters:
+- Max Tokens Per Request (MTPR): 8191 tokens
+- Segments are processed sequentially using segment_idx:
+  - segment_idx=0: First 8191 tokens
+  - segment_idx=1: Next 8191 tokens, etc.
 
-First we will obtain the embeddings of the first 8191 tokens of all texts,
-then the next 8191 and so on. The parameter "segment_idx" will keep
-track of which part of the text we are processing. "segment_idx = 0"
-means we are processing the first 8191 tokens, "segment_idx = 1" means 
-we are processing the next 8191 tokens, and so on.
+The script uses asyncio for parallel processing, creating batches up to the
+rate limits (tokens/requests per minute) before making API calls.
 
-To speed up things, we will use asyncio to make requests in parallel. We will
-create batches until we achieve the max number of tokens per minute or the max 
-max number of requests per minute. Then we will make the requests and start
-again. 
-
-Models from OpenAI        Dimensions    Max tokens
-text-embedding-ada-002	    1536	        8191
-text-embedding-3-small	    1536	        8191
-text-embedding-3-large	    3072	        8191
+Available OpenAI Models:
+- text-embedding-ada-002:    1536 dimensions, 8191 max tokens
+- text-embedding-3-small:    1536 dimensions, 8191 max tokens  
+- text-embedding-3-large:    3072 dimensions, 8191 max tokens
 """
 
 import time
+import os
+from typing import List
+
 import pandas as pd
 import asyncio
-import os
+
 from gpt4_parallel_processing import get_embedding_list
-from process_patent_xml import TXT_COLUMNS, MODEL
+from process_patent_xml import TEXT_COLUMNS, EMBEDDING_MODEL
 
-TXT_COLUMNS = ["abstract"]  # TODO: delete this line
-print("WARNING: only processing abstracts")  # TODO: delete this line
-
-# tokens per minute
-TPM = 1e6
-# requests per min
-# TODO: why not 500? in my experiments, 400 gave consistent results.
-RPM = 400
-# max tokens per request
-MTPR = 8191
+# API Rate Limits
+TOKENS_PER_MINUTE = int(1e6)
+REQUESTS_PER_MINUTE = 400  # Conservative limit for reliability
+MAX_TOKENS_PER_REQUEST = 8191
 
 
-def from_sub_df_get_embeddings(txt_col: str, df: pd.DataFrame, k: int) -> list:
-    """
-    Retrieve embeddings for a specific text column in a DataFrame.
+def from_sub_df_get_embeddings(
+    text_column: str,
+    df: pd.DataFrame,
+    segment_idx: int
+) -> List[List[float]]:
+    """Retrieve embeddings for a specific text column in a DataFrame.
 
     Args:
-        txt_col (str): The name of the text column 
-                        (abstract, claims, description).
-        df (pd.DataFrame): The DataFrame containing the text data.
-        k (int): keeps track of which part of the text we are processing. k = 0
-                means we are processing the first 8191 tokens, k = 1 means we
-                are processing the next 8191 tokens, and so on.
+        text_column: Name of the text column (abstract, claims, description)
+        df: DataFrame containing the text data
+        segment_idx: Index tracking which segment of text is being processed
+            (0 = first 8191 tokens, 1 = next 8191 tokens, etc.)
 
     Returns:
-        list: The list of embeddings for the text column.
+        List of embedding vectors for the text column
     """
-
     embeddings = []
-
     batch = []
     batch_tokens = 0
     batch_requests = 0
     last_request_time = time.time()
 
-    def check_wait(last_request_time: float):
-        return
-        # TODO: delete this line
-        # """Check if we need to wait and wait if necessary."""
-        # time_since_last_request = time.time() - last_request_time
-        # if time_since_last_request < 60:
-        #     time.sleep(60 - time_since_last_request)
+    def check_wait(last_request_time: float) -> None:
+        """Check if rate limiting requires a wait period.
 
-    for i, row in df.iterrows():
-        n_tokens = row[f"{txt_col}_tokens"]
-        txt = row[txt_col]
-        # cut the text
-        txt = txt[k*MTPR: min(len(txt), (k+1)*MTPR)]
+        Args:
+            last_request_time: Timestamp of last API request
 
-        # check if we need to make a request
-        if batch_tokens + n_tokens >= TPM or batch_requests + 1 >= RPM:
-            # check if we need to wait and wait if necessary
+        Ensures at least 60 seconds between batches to stay within rate limits.
+        """
+        time_since_last = time.time() - last_request_time
+        if time_since_last < 60:
+            time.sleep(60 - time_since_last)
+
+    for _, row in df.iterrows():
+        num_tokens = row[f"{text_column}_tokens"]
+        text = row[text_column]
+
+        # Extract relevant segment of text
+        start_idx = segment_idx * MAX_TOKENS_PER_REQUEST
+        end_idx = min(len(text), (segment_idx + 1) * MAX_TOKENS_PER_REQUEST)
+        text_segment = text[start_idx:end_idx]
+
+        # Process batch if limits reached
+        if (batch_tokens + num_tokens >= TOKENS_PER_MINUTE or
+                batch_requests + 1 >= REQUESTS_PER_MINUTE):
+
             check_wait(last_request_time)
-
-            batch_embed = asyncio.run(
-                get_embedding_list(batch, max_parallel_calls=RPM))
+            batch_embeddings = asyncio.run(
+                get_embedding_list(
+                    batch, max_parallel_calls=REQUESTS_PER_MINUTE)
+            )
             last_request_time = time.time()
 
-            embeddings.extend(batch_embed)
+            embeddings.extend(batch_embeddings)
             batch = []
             batch_tokens = 0
             batch_requests = 0
 
-        batch.append(txt)
-        batch_tokens += n_tokens
+        batch.append(text_segment)
+        batch_tokens += num_tokens
         batch_requests += 1
 
-    # last batch
-    check_wait(last_request_time)
-    batch_embed = asyncio.run(
-        get_embedding_list(batch, max_parallel_calls=RPM))
-    embeddings.extend(batch_embed)
+    # Process final batch
+    if batch:
+        check_wait(last_request_time)
+        batch_embeddings = asyncio.run(
+            get_embedding_list(batch, max_parallel_calls=REQUESTS_PER_MINUTE)
+        )
+        embeddings.extend(batch_embeddings)
 
-    # extend the embeddings for long texts
-    old_embeddings = df[f"{txt_col}_embeddings"].tolist()
-    for i, old_e in enumerate(old_embeddings):
-        old_e.append(embeddings[i])
+    # Combine with existing embeddings
+    existing_embeddings = df[f"{text_column}_embeddings"].tolist()
+    for i, existing in enumerate(existing_embeddings):
+        existing.append(embeddings[i])
 
-    return old_embeddings
+    return existing_embeddings
 
 
-if __name__ == "__main__":
-
-    # we are sequentially going to get the embeddings from the text.
-    # First the first MTPR=8191 tokens, then the next MTPR=8191 tokens, and so on.
-    # We are doing this for abstract, claims, description, and title
-
-    # open dataframe
-    folder_year = r"C:\Users\Roberto\Documents\GitHub Repositories\USPTO\data\fake_2005_folder"
+def main():
+    """Main execution function."""
+    # Load DataFrame
+    folder_year = (
+        r"C:\Users\Roberto\Documents\GitHub_repositories\USPTO\data"
+        r"\fake_2005_folder"
+    )
     df = pd.read_parquet(os.path.join(folder_year, "dataframe.parquet"))
 
-    # TODO: delete this line!
-    df = df.head(1000)
+    # Initialize embedding columns
+    for column in TEXT_COLUMNS:
+        df[f"{column}_embeddings"] = df[column].apply(lambda _: [])
 
-    # create column with empty lists
-    for txt_col in TXT_COLUMNS:
-        df[f"{txt_col}_embeddings"] = df[txt_col].apply(lambda x: [])
-
-    # keeps track of which part of the text we are processing
-    segment_idx = 0
-
-    for col in TXT_COLUMNS:
-        print(f"Processing {col}")
-
+    # Process each text column
+    for column in TEXT_COLUMNS:
+        print(f"Processing {column}")
+        segment_idx = 0
         sub_df = df
 
         while len(sub_df) > 0:
-            embeddings = from_sub_df_get_embeddings(col, sub_df, segment_idx)
-            df[f"{col}_embeddings"] = embeddings
+            embeddings = from_sub_df_get_embeddings(
+                column, sub_df, segment_idx)
+            df[f"{column}_embeddings"] = embeddings
 
             segment_idx += 1
-            sub_df = df[df[f"{col}_tokens"] > segment_idx*MTPR]
+            sub_df = df[df[f"{column}_tokens"] >
+                        segment_idx * MAX_TOKENS_PER_REQUEST]
 
-    # save the dataframe
+    # Save results
     df.to_parquet("data/df_with_embeddings.parquet", index=False)
-    print("Dataframe saved")
+    print("DataFrame saved successfully")
+
+
+if __name__ == "__main__":
+    main()
