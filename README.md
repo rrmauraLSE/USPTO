@@ -1,58 +1,80 @@
-# USPTO
- JMP code
+# Patent Gender Bias Analysis
 
+## Overview
+This project investigates potential gender bias in patent application reviews
+using causal inference methods and deep learning. It is part of my PhD thesis
+developing statistical theory for causal regression with high-dimensional 
+data (images and text) using double debiased machine learning.
 
-RPM (requests per minute),
-RPD (requests per day),
-TPM (tokens per minute), 1,000,000 
-TPD (tokens per day), and 
-IPM (images per minute)
+## Research Question
+Does an applicant's gender causally affect their probability of patent 
+acceptance? The project aims to detect if patent reviewers exhibit systematic
+bias based on applicant gender.
 
-  text-embedding-3-large	500	-	1,000,000
-  500 rpm ? or 5000 rpm? chekc the limit with code in parallel. Also: 
-  links : https://platform.openai.com/docs/guides/rate-limits/usage-tiers?context=tier-two
-  links: https://platform.openai.com/account/limits
+### Methodological Approach
+While a randomized control trial would be ideal (randomly assigning authors to
+patents), this is infeasible. Instead, the project combines:
+- Causal inference techniques
+- Econometric methods  
+- Deep learning models
+- Double debiased machine learning to avoid estimation bias
 
+## Project Structure
 
-33 calls... so it does not matter that much... you should call 33 per min 
-this could take forever... but you only gotta do it once... 
+### Data Collection
+`download_patent_data.py`
+- Downloads patent application data from USPTO
+- Handles both text-only and image-embedded TIFF files
+- Configurable by year range
+- Supports both application and grant data types
 
-Priority. Do it safely. You only wanna do it once. 
-Maybe better to do one call at a time. 
+### Data Processing 
+`process_patent_xml.py`
+- Extracts structured data from USPTO XML files
+- Processes metadata: titles, publication details, classifications
+- Handles inventor information
+- Parses abstracts, descriptions, and claims
+- Manages compressed file extraction
+- Calculates text statistics
+- Outputs to parquet format
 
+### Model Infrastructure
+`gpt4_parallel_processing.py`
+- Implements asynchronous OpenAI API client
+- Enables parallel processing of GPT-4 requests
+- Handles rate limiting and error management
+- Supports both chat completions and embeddings
 
-## DATASETS
+### Text Embedding Generation
+`generate_embeddings.py`
+- Converts patent text data to embeddings using OpenAI models
+- Handles text segmentation for long documents
+- Implements efficient batch processing
+- Manages API rate limits
+- Supports multiple embedding models:
+  - text-embedding-ada-002 (1536d)
+  - text-embedding-3-small (1536d)
+  - text-embedding-3-large (3072d)
 
-This is the list of datasets that are contained here: 
+## Technical Details
+- Asynchronous processing for API efficiency
+- Robust error handling and rate limiting
+- Modular design for maintainability
+- Comprehensive data preprocessing pipeline
+- Scalable architecture for large dataset processing
 
+## Dependencies
+- OpenAI API
+- pandas
+- asyncio
+- aiohttp
+- BeautifulSoup
+- tiktoken
+- tqdm
 
-
-1) The USPTO Patents View data, which
-includes detailed information on both granted patents and patent applications. 
-https://www.uspto.gov/ip-policy/economic-research/research-datasets/patent-examination-research-dataset-public-pair
-
-
-2) The Patent Claims Research Dataset (Marco et al., 2019) from which I obtain detailed information on the
-number of claims per patent, claim text, and the change in the claims between application
-to granting for granted patents; 
-
-http://www.uspto.gov/economics
-
-3) “Google Patents Research Data” from which I pull the
-abstract and description text of each patent application; 
-
-4) Examiners’ roster, pay scale, and
-education levels from Frakes and Wasserman (2017) Freedom of Information Act request;
-
-5) Kogan et al. (2017) patent market value data, which run event studies to estimate the
-excess stock market return realized on the grant date of patents assigned to publicly traded
-6Utility patents are granted for the “invention of a new and useful process, machine, manufacture, or
-composition of matter” (USPTO 2010).
-7Since the American Inventors Protection Act of 1999, almost all the USPTO patent applications filed
-after November 29th, 2000 were published online, regardless of whether they are granted or not.
-11
-firms; 
-
-6) USPTO Office Action Rejection, which documents the grounds of rejections for all
-rejected patent applications from 2008 to 2017. For additional information about the patent
-data, see Appendix Sectio
+## Usage
+1. Configure API keys and parameters
+2. Run data collection script
+3. Process XML files into structured format
+4. Generate embeddings for analysis
+5. Apply causal inference methods (TODO)

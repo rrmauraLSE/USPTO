@@ -29,8 +29,8 @@ import time
 import pandas as pd
 import asyncio
 import os
-from step_2_call_GPT4_Chat_in_parallel import get_embedding_list
-from step_1_create_dataframe import TXT_COLUMNS, MODEL
+from gpt4_parallel_processing import get_embedding_list
+from process_patent_xml import TXT_COLUMNS, MODEL
 
 TXT_COLUMNS = ["abstract"]  # TODO: delete this line
 print("WARNING: only processing abstracts")  # TODO: delete this line
