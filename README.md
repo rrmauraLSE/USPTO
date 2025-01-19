@@ -56,6 +56,10 @@ patents), this is infeasible. Instead, the project combines:
   - text-embedding-3-small (1536d)
   - text-embedding-3-large (3072d)
 
+### Gender Guesser
+`guess_gender.py`
+- Uses SSA data and gender-guesser library to guess gender of inventors
+
 ## Technical Details
 - Asynchronous processing for API efficiency
 - Robust error handling and rate limiting
