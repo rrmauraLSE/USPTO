@@ -1,142 +1,159 @@
+"""Creates a DataFrame from USPTO patent XML files.
 
+This script processes USPTO patent application XML files to extract key
+metadata and content including titles, publication details, classifications,
+inventors, abstracts, descriptions, and claims. It handles compressed files by
+unzipping them first, then parses each XML file to build a DataFrame.
+
+The script follows these main steps:
+1. Unzips any compressed files in the target folder and subfolders
+2. Identifies relevant XML files (excluding genetic sequence listings)
+3. Parses each XML file to extract structured data
+4. Builds a DataFrame with the extracted information
+5. Calculates text statistics like character and token counts
+6. Saves the results to parquet format
+
+Example:
+    To process patent files for year 2005:
+    >>> folder_year = "path/to/2005/files"
+    >>> df, errors = create_dataframe(folder_year)
+    >>> df.to_parquet("patents_2005.parquet")
 """
-This creates a dataframe by parsing XML files in a given folder. 
-The XML files contain information about patent publications, including: 
-- publication title
-- number
-- date
-- application type
-- classifications
-- inventors
-- abstracts
-- descriptions
-- claims
 
-The script unzips any compressed files in the folder and its subfolders, 
-then parses each XML file to extract the relevant information. 
-The extracted information is stored in a pandas DataFrame, saved as a CSV file.
-"""
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+import logging
 
-from tqdm import tqdm
 from bs4 import BeautifulSoup
 import pandas as pd
-import html
+from tqdm import tqdm
+import tiktoken
 import zipfile
 import os
-import tiktoken
 
-
+# Constants
 MAX_CALLS_PER_SECOND = 10
-TXT_COLUMNS = ["abstract", "claims", "description", "title"]
-MODEL = "text-embedding-ada-002"
-MAX_TOKENS = 8191  # this value depends on the model.
+TEXT_COLUMNS = ["abstract", "claims", "description", "title"]
+EMBEDDING_MODEL = "text-embedding-ada-002"
+MAX_TOKENS = 8191  # Maximum tokens for text-embedding-ada-002 model
 
-# Notes for me:
-# it takes around 10 min to run for 2 folders.
-# the csv file is 500MB approximately.
-
-# TODO: what am I supossed to do with the supplementary material?
-# TODO: delete the zip files after unzipping them
-
-
-def count_tokens(string: str, encoding_name: str) -> int:
-    encoding = tiktoken.encoding_for_model(encoding_name)
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
-def is_file_compressed(file_path: str) -> bool:
-    """
-    Checks if a file is compressed (zip or tar).
+def count_tokens(text: str, model: str = EMBEDDING_MODEL) -> int:
+    """Count the number of tokens in a text string using the model's tokenizer.
 
     Args:
-        file_path (str): The path of the file.
+        text: The input text to tokenize
+        model: Name of the model whose tokenizer to use
 
     Returns:
-        bool: True if the file is compressed, False otherwise.
+        Number of tokens in the text
     """
-    lowercase_path = file_path.lower()
-    return lowercase_path.endswith(".zip") or lowercase_path.endswith(".tar")
+    encoding = tiktoken.encoding_for_model(model)
+    return len(encoding.encode(text))
 
 
-def unzip_files(folder: str) -> None:
-    """
-    Unzips all files in the folder and subfolders.
+def is_file_compressed(file_path: Path) -> bool:
+    """Check if a file is a compressed archive (zip/tar).
 
     Args:
-        folder (str): The path of the folder.
-    """
-    for root, dirs, files in os.walk(folder):
-        for file in tqdm(files, desc="Unzipping files"):
-            if is_file_compressed(file):
-                # check first if they have been already unzipped
-                if not os.path.exists(os.path.join(root, file[:-4])):
-                    tqdm.write(f"Unzipping {file}...")
-                    with zipfile.ZipFile(os.path.join(root, file), 'r') as zip_ref:
-                        zip_ref.extractall(root)
-                    tqdm.write(f"Unzipped {file}")
-                else:
-                    tqdm.write(f"File {file} already unzipped, skipping.")
-
-                # unzip all zip files within the unzipped folder
-                unzip_files(os.path.join(root, file[:-4]))
-
-
-def parse_xml(xml_path: str) -> dict:
-    """
-    Parses an XML file and extracts relevant information.
-
-    Args:
-        xml_path (str): The path of the XML file.
+        file_path: Path to the file to check
 
     Returns:
-        dict: A dictionary containing the extracted information.
+        True if file has a compressed format extension
     """
+    return file_path.suffix.lower() in {'.zip', '.tar'}
 
+
+def unzip_files(folder: Path) -> None:
+    """Recursively unzip all compressed files in a folder and its subfolders.
+
+    Args:
+        folder: Path to the root folder to process
+    """
+    for file_path in tqdm(list(folder.rglob('*')), desc="Unzipping files"):
+        if not is_file_compressed(file_path):
+            continue
+
+        extracted_path = file_path.with_suffix('')
+        if extracted_path.exists():
+            logger.info(f"Skipping {file_path.name} - already extracted")
+            continue
+
+        logger.info(f"Unzipping {file_path.name}...")
+        with zipfile.ZipFile(file_path, 'r') as zip_ref:
+            zip_ref.extractall(file_path.parent)
+        logger.info(f"Unzipped {file_path.name}")
+
+        # Recursively handle nested archives
+        unzip_files(extracted_path)
+
+
+def parse_xml(xml_path: Path) -> Dict:
+    """Parse a USPTO XML file to extract patent metadata and content.
+
+    Args:
+        xml_path: Path to the XML file
+
+    Returns:
+        Dictionary containing extracted patent information
+
+    Raises:
+        ValueError: If required XML elements are missing
+    """
     def get_text_or_none(tag):
-        # save the name of the tag
         return tag.get_text() if tag else None
 
-    with open(xml_path, 'r', encoding='UTF-8') as file:
-        content = file.read()
+    with open(xml_path, 'r', encoding='UTF-8') as f:
+        soup = BeautifulSoup(f.read(), 'xml')
 
-    soup = BeautifulSoup(content, 'xml')
-
-    # Extracting publication title, number, and date
+    # Extract core publication details
     title = soup.find('invention-title').get_text()
-    number = soup.find('publication-reference').find('doc-number').get_text()
+    pub_ref = soup.find('publication-reference')
+    number = pub_ref.find('doc-number').get_text()
+    date = pub_ref.find('date').get_text()
+
+    # Get application ID with fallback
     try:
         application_id = soup.find('parent-doc').find('doc-number').get_text()
-    except:
-        application_id = soup.find(
-            'application-reference').find('doc-number').get_text()
-    date = soup.find('publication-reference').find('date').get_text()
+    except AttributeError:
+        app_ref = soup.find('application-reference')
+        application_id = app_ref.find('doc-number').get_text()
 
-    # Application type
-    application_reference = soup.find('application-reference')
-    application_type = application_reference['appl-type'] if application_reference else None
+    # Get application type if available
+    app_ref = soup.find('application-reference')
+    application_type = app_ref['appl-type'] if app_ref else None
 
-    # Classifications
-    ipc_classifications = [ipc.get_text()
-                           for ipc in soup.find_all('classification-ipc')]
-    national_classifications = [nc.get_text()
-                                for nc in soup.find_all('classification-national')]
+    # Extract classifications
+    ipc_classifications = [
+        ipc.get_text() for ipc in soup.find_all('classification-ipc')
+    ]
+    national_classifications = [
+        nc.get_text() for nc in soup.find_all('classification-national')
+    ]
 
-    # Inventors
-    inventors = [{'last_name': inventor.find('last-name').get_text(),
-                  'first_name': inventor.find('first-name').get_text()}
-                 for inventor in soup.find_all('applicant')]
+    # Extract inventor information
+    inventors = [
+        {
+            'last_name': inv.find('last-name').get_text(),
+            'first_name': inv.find('first-name').get_text()
+        }
+        for inv in soup.find_all('applicant')
+    ]
 
-    # Abstract
+    # Extract main text content
     abstract = soup.find('abstract').get_text()
-
-    # Description
     description = soup.find('description').get_text()
-
-    # Claims
-    claims = [claim.get_text(separator="\n", strip=True)
-              for claim in soup.find_all('claim')]
-    claims = "\n".join(claims)
+    claims = "\n".join(
+        claim.get_text(separator="\n", strip=True)
+        for claim in soup.find_all('claim')
+    )
 
     return {
         'title': title,
@@ -153,83 +170,85 @@ def parse_xml(xml_path: str) -> dict:
     }
 
 
-def get_relevant_xml_files(folder: str) -> list:
-    all_xml_files = []
-    for root, _, files in os.walk(folder):
-        for file in files:
-            # ignore SEQLST files (they contain genetic list data)
-            if file.lower().endswith(".xml") and "seqlst" not in file.lower():
-                xml_path = os.path.join(root, file)
-                all_xml_files.append(xml_path)
-    return all_xml_files
-
-
-def create_dataframe(folder_year: str) -> pd.DataFrame:
-    """
-    Creates a dataframe by parsing XML files in a given folder.
+def get_relevant_xml_files(folder: Path) -> List[Path]:
+    """Find all relevant XML files in a folder, excluding sequence listings.
 
     Args:
-        folder_year (str): The path of the folder containing the XML files.
+        folder: Path to search for XML files
 
     Returns:
-        pd.DataFrame: The created dataframe.
+        List of paths to relevant XML files
     """
-    # create empty dataframe
-    df = pd.DataFrame(columns=['title',
-                               'publication_number',
-                               'publication_date',
-                               'application_type',
-                               'ipc_classifications',
-                               'national_classifications',
-                               'inventors',
-                               'abstract',
-                               'description',
-                               'claims'])
+    return [
+        path for path in folder.rglob('*.xml')
+        if 'seqlst' not in path.name.lower()
+    ]
 
+
+def create_dataframe(folder_year: Path) -> Tuple[pd.DataFrame, List[Path]]:
+    """Create a DataFrame from USPTO patent XML files in a folder.
+
+    Args:
+        folder_year: Path containing the XML files to process
+
+    Returns:
+        Tuple of (DataFrame containing patent data, List of failed files)
+    """
+    columns = [
+        'title', 'publication_number', 'publication_date', 'application_type',
+        'ipc_classifications', 'national_classifications', 'inventors',
+        'abstract', 'description', 'claims'
+    ]
+    df = pd.DataFrame(columns=columns)
     error_files = []
 
-    # iterate over all XML files in the folder
-    relevant_xml_files = get_relevant_xml_files(folder_year)
+    xml_files = get_relevant_xml_files(folder_year)
 
-    for xml_path in tqdm(relevant_xml_files, desc="Parsing XML files"):
+    for xml_path in tqdm(xml_files, desc="Parsing XML files"):
         try:
-            parsed_xml = parse_xml(xml_path)
-            df = pd.concat([df, pd.DataFrame([parsed_xml])],
-                           ignore_index=True)
-
+            parsed_data = parse_xml(xml_path)
+            df = pd.concat(
+                [df, pd.DataFrame([parsed_data])],
+                ignore_index=True
+            )
         except Exception as e:
-            print(f"Error parsing {xml_path}: {e}")
+            logger.error(f"Failed to parse {xml_path}: {str(e)}")
             error_files.append(xml_path)
-            print("shape of df: ", df.shape)
+            logger.info(f"Current DataFrame shape: {df.shape}")
 
     return df, error_files
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Main execution function."""
 
-    # main_folder = r"C:\Users\Roberto\Documents\GitHub Repositories\USPTO\data\images_and_text_data"
+    base_path = Path(
+        r"C:\Users\Roberto\Documents\GitHub_repositories\USPTO\data"
+    )
 
-    # folder_year = os.path.join(main_folder, "2005")
+    folder_year = base_path / "images_and_text_data" / "2005"
 
-    # fake folder to do testing:
-    folder_year = r"C:\Users\Roberto\Documents\GitHub Repositories\USPTO\data\fake_2005_folder"
-
+    # Process files
     # unzip_files(folder_year)
-
     df, error_files = create_dataframe(folder_year)
 
-    # save error files
-    with open(os.path.join(folder_year, "error_files.txt"), "w") as file:
-        for error_file in error_files:
-            file.write(error_file + "\n")
+    # Save error log
+    error_log = folder_year / "error_files.txt"
+    with open(error_log, "w") as f:
+        f.write("\n".join(str(path) for path in error_files))
 
-    # count characters and tokens
-    for col in TXT_COLUMNS:
-        df[f"{col}_characters"] = df[col].apply(lambda x: len(x))
-        df[f"{col}_tokens"] = df[col].apply(lambda x: count_tokens(x, MODEL))
+    # Calculate text statistics
+    for col in TEXT_COLUMNS:
+        df[f"{col}_characters"] = df[col].str.len()
+        df[f"{col}_tokens"] = df[col].apply(count_tokens)
 
-    # save dataframe
-    df.to_parquet(os.path.join(folder_year, "dataframe.parquet"), index=False)
+    # Save results
+    output_file = folder_year / "dataframe.parquet"
+    df.to_parquet(output_file, index=False)
 
-    print("Dataframe created")
-    print(f"Error files: {len(error_files)}")
+    logger.info("DataFrame creation completed")
+    logger.info(f"Number of failed files: {len(error_files)}")
+
+
+if __name__ == "__main__":
+    main()
