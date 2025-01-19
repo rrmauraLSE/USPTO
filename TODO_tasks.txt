@@ -5,6 +5,22 @@
 
 get variable "gender"
 
+TRY VIM? speed up process of coding / 
+look at the newest version of github copilot 
 
+Upload your code to amazon. Get some GPU ussage. 
+
+Questions on Amazon ussage / GPU ussage? 
 
 start to work on finetuned patent images
+
+# okay, first consider a few models
+# maybe finetune them with LORA on a few thousand images + abstract
+# Or maybe just use out of the box programs 
+
+
+Back to the basics: causal regressions with image / text is proxy control
+
+lessons: 
+1) you need 2 independent controls. One will not be enought if non-linear
+2) use images or ?something else? 
